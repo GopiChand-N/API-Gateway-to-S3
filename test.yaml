@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  Name:
+    Type: String
+
+Resources:
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref Name
+  MyIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+
+      Description: S3 objects Put role
+      Path: /
+
+      Policies:
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:ListBucket
+                Resource: "*"
+                Effect: Allow
+
+          PolicyName: MyS3Policy1
+      RoleName: MyS3Role1
+  MyRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Name: s3api
+  MyResource0:
+    Type: "AWS::ApiGateway::Resource"
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RestApiId: !Ref MyRestApi
+      ParentId: !GetAtt
+        - MyRestApi
+        - RootResourceId
+      PathPart: bucket
+
+  MyResource1:
+    Type: "AWS::ApiGateway::Resource"
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RestApiId: !Ref MyRestApi
+      ParentId: !GetAtt MyResource0.ResourceId
+      PathPart: "{filename}"
+
+  MyMethod:
+    Type: "AWS::ApiGateway::Method"
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ApiKeyRequired: false
+      RestApiId: !Ref MyRestApi
+      ResourceId: !GetAtt MyResource1.ResourceId
+      HttpMethod: PUT
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.filename: true
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: PUT
+        Type: AWS
+        Uri: arn:aws:apigateway:us-east-1:s3:path/${stageVariables.bucket}/{filename}
+        RequestParameters:
+          integration.request.path.filename: method.request.path.filename
+        Credentials: !GetAtt MyIAMRole.Arn
+      MethodResponses:
+        - StatusCode: 200
+  MyModels:
+    Type: AWS::ApiGateway::Model
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ContentType: application/json
+      RestApiId: !Ref MyRestApi
+      Schema: {}
+
+  Deployment:
+    DependsOn: MyMethod
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref MyRestApi
+      Description: My deployment
+      StageName: DEV
+      StageDescription:
+        Variables:
+          bucket: !Ref MyS3Bucket
